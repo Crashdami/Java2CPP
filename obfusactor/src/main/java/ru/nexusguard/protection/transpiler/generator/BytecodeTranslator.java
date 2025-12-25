@@ -25,6 +25,8 @@ public final class BytecodeTranslator {
         handlers.add(new LdcInsnHandler(typeMapper));
         handlers.add(new IincInsnHandler());
         handlers.add(new JumpInsnHandler());
+        handlers.add(new TableSwitchInsnHandler());
+        handlers.add(new LookupSwitchInsnHandler());
         handlers.add(new FieldInsnHandler(typeMapper));
         handlers.add(new InvokeDynamicInsnHandler(typeMapper));
         handlers.add(new MethodInsnHandler(typeMapper));
@@ -984,6 +986,48 @@ public final class BytecodeTranslator {
         }
     }
 
+    private static final class TableSwitchInsnHandler implements InstructionHandler {
+        @Override
+        public boolean supports(AbstractInsnNode insn) {
+            return insn instanceof TableSwitchInsnNode;
+        }
+
+        @Override
+        public void emit(AbstractInsnNode insn, MethodContext context, CodeWriter out) {
+            TableSwitchInsnNode node = (TableSwitchInsnNode) insn;
+            String key = context.temp("ts_key");
+            out.line("int64_t " + key + " = frame.stack.popI64();");
+            out.line("switch (" + key + ") {");
+            for (int i = 0; i < node.labels.size(); i++) {
+                int value = node.min + i;
+                out.line("case " + value + ": goto " + context.label(node.labels.get(i)) + ";");
+            }
+            out.line("default: goto " + context.label(node.dflt) + ";");
+            out.line("}");
+        }
+    }
+
+    private static final class LookupSwitchInsnHandler implements InstructionHandler {
+        @Override
+        public boolean supports(AbstractInsnNode insn) {
+            return insn instanceof LookupSwitchInsnNode;
+        }
+
+        @Override
+        public void emit(AbstractInsnNode insn, MethodContext context, CodeWriter out) {
+            LookupSwitchInsnNode node = (LookupSwitchInsnNode) insn;
+            String key = context.temp("ls_key");
+            out.line("int64_t " + key + " = frame.stack.popI64();");
+            out.line("switch (" + key + ") {");
+            for (int i = 0; i < node.keys.size(); i++) {
+                Integer value = node.keys.get(i);
+                out.line("case " + value + ": goto " + context.label(node.labels.get(i)) + ";");
+            }
+            out.line("default: goto " + context.label(node.dflt) + ";");
+            out.line("}");
+        }
+    }
+
     private static final class FieldInsnHandler implements InstructionHandler {
         private final TypeMapper typeMapper;
 
@@ -1109,6 +1153,10 @@ public final class BytecodeTranslator {
             if (!isStringConcat(node)) {
                 if (isRunnableLambda(node)) {
                     emitRunnableLambda(node, context, out);
+                } else if (isSupplierLambda(node)) {
+                    emitSupplierLambda(node, context, out);
+                } else if (isTypeSwitch(node)) {
+                    emitTypeSwitch(node, context, out);
                 } else {
                     emitFallback(node, context, out);
                 }
@@ -1136,6 +1184,52 @@ public final class BytecodeTranslator {
             }
             String name = node.bsm.getName();
             return "metafactory".equals(name) || "altMetafactory".equals(name);
+        }
+
+        private boolean isSupplierLambda(InvokeDynamicInsnNode node) {
+            Type returnType = Type.getReturnType(node.desc);
+            if (returnType.getSort() != Type.OBJECT || !"java/util/function/Supplier".equals(returnType.getInternalName())) {
+                return false;
+            }
+            if (!"get".equals(node.name)) {
+                return false;
+            }
+            if (node.bsm == null) {
+                return false;
+            }
+            if (!"java/lang/invoke/LambdaMetafactory".equals(node.bsm.getOwner())) {
+                return false;
+            }
+            String name = node.bsm.getName();
+            if (!"metafactory".equals(name) && !"altMetafactory".equals(name)) {
+                return false;
+            }
+            Type[] args = Type.getArgumentTypes(node.desc);
+            return args.length == 1;
+        }
+
+        private boolean isTypeSwitch(InvokeDynamicInsnNode node) {
+            if (node.bsm == null) {
+                return false;
+            }
+            if (!"java/lang/runtime/SwitchBootstraps".equals(node.bsm.getOwner())) {
+                return false;
+            }
+            if (!"typeSwitch".equals(node.bsm.getName())) {
+                return false;
+            }
+            Type returnType = Type.getReturnType(node.desc);
+            if (returnType.getSort() != Type.INT) {
+                return false;
+            }
+            Type[] args = Type.getArgumentTypes(node.desc);
+            if (args.length != 2) {
+                return false;
+            }
+            if (args[0].getSort() != Type.OBJECT && args[0].getSort() != Type.ARRAY) {
+                return false;
+            }
+            return args[1].getSort() == Type.INT;
         }
 
         private boolean isStringConcat(InvokeDynamicInsnNode node) {
@@ -1223,6 +1317,136 @@ public final class BytecodeTranslator {
             out.line("jobject " + runnable + " = env->CallStaticObjectMethod(" + helperCls + ", " + helperMid + ", " + ownerStr + ", " + nameStr + ", " + descStr + ");");
             emitExceptionReturn(context, out);
             out.line("frame.stack.pushRef(" + runnable + ");");
+        }
+
+        private void emitTypeSwitch(InvokeDynamicInsnNode node, MethodContext context, CodeWriter out) {
+            if (node.bsmArgs == null || node.bsmArgs.length == 0) {
+                emitFallback(node, context, out);
+                return;
+            }
+
+            List<Type> types = new ArrayList<>();
+            for (Object arg : node.bsmArgs) {
+                if (arg instanceof Type type) {
+                    types.add(type);
+                } else {
+                    emitFallback(node, context, out);
+                    return;
+                }
+            }
+
+            List<String> clsVars = new ArrayList<>();
+            for (int i = 0; i < types.size(); i++) {
+                Type type = types.get(i);
+                String cls = context.temp("ts_cls");
+                clsVars.add(cls);
+                String clsLocal = context.temp("ts_cls_local");
+                out.line("static jclass " + cls + " = nullptr;");
+                out.line("if (" + cls + " == nullptr) {");
+                out.indent();
+                String name = type.getSort() == Type.ARRAY ? type.getDescriptor() : type.getInternalName();
+                out.line("jclass " + clsLocal + " = env->FindClass(\"" + CppStringEscaper.escape(name) + "\");");
+                out.line(cls + " = static_cast<jclass>(env->NewGlobalRef(" + clsLocal + "));");
+                out.line("if (" + clsLocal + " != nullptr) env->DeleteLocalRef(" + clsLocal + ");");
+                out.outdent();
+                out.line("}");
+            }
+
+            String start = context.temp("ts_start");
+            String obj = context.temp("ts_obj");
+            String result = context.temp("ts_res");
+            out.line("jint " + start + " = static_cast<jint>(frame.stack.popI64());");
+            out.line("jobject " + obj + " = frame.stack.popRef();");
+            out.line("jint " + result + " = " + types.size() + ";");
+            out.line("if (" + start + " < 0) " + start + " = 0;");
+            out.line("if (" + obj + " != nullptr && " + start + " < " + types.size() + ") {");
+            out.indent();
+            for (int i = 0; i < types.size(); i++) {
+                String clsName = clsVars.get(i);
+                if (i == 0) {
+                    out.line("if (" + start + " <= " + i + " && env->IsInstanceOf(" + obj + ", " + clsName + ") == JNI_TRUE) {");
+                } else {
+                    out.line("else if (" + start + " <= " + i + " && env->IsInstanceOf(" + obj + ", " + clsName + ") == JNI_TRUE) {");
+                }
+                out.indent();
+                out.line(result + " = " + i + ";");
+                out.outdent();
+                out.line("}");
+            }
+            out.outdent();
+            out.line("}");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + result + "));");
+            out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
+        }
+
+        private void emitSupplierLambda(InvokeDynamicInsnNode node, MethodContext context, CodeWriter out) {
+            if (node.bsmArgs == null || node.bsmArgs.length < 2 || !(node.bsmArgs[1] instanceof Handle handle)) {
+                emitFallback(node, context, out);
+                return;
+            }
+
+            String owner = handle.getOwner();
+            String name = handle.getName();
+            String desc = handle.getDesc();
+
+            String captured = context.temp("dyn_cap");
+            out.line("jobject " + captured + " = frame.stack.popRef();");
+
+            String helperCls = context.temp("dyn_cls");
+            String helperLocal = context.temp("dyn_cls_local");
+            out.line("static jclass " + helperCls + " = nullptr;");
+            out.line("if (" + helperCls + " == nullptr) {");
+            out.indent();
+            out.line("jclass " + helperLocal + " = env->FindClass(\"ru/nexusguard/protection/native/InvokeDynamicHelper\");");
+            out.line(helperCls + " = static_cast<jclass>(env->NewGlobalRef(" + helperLocal + "));");
+            out.line("if (" + helperLocal + " != nullptr) env->DeleteLocalRef(" + helperLocal + ");");
+            out.outdent();
+            out.line("}");
+
+            String helperMid = context.temp("dyn_mid");
+            out.line("static jmethodID " + helperMid + " = nullptr;");
+            out.line("if (" + helperMid + " == nullptr) {");
+            out.indent();
+            out.line(helperMid + " = env->GetStaticMethodID(" + helperCls + ", \"createSupplier\", \"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;)Ljava/util/function/Supplier;\");");
+            out.outdent();
+            out.line("}");
+
+            String ownerStr = context.temp("dyn_owner");
+            String ownerLocal = context.temp("dyn_owner_local");
+            String nameStr = context.temp("dyn_name");
+            String nameLocal = context.temp("dyn_name_local");
+            String descStr = context.temp("dyn_desc");
+            String descLocal = context.temp("dyn_desc_local");
+            out.line("static jstring " + ownerStr + " = nullptr;");
+            out.line("if (" + ownerStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + ownerLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(owner) + "\");");
+            out.line(ownerStr + " = static_cast<jstring>(env->NewGlobalRef(" + ownerLocal + "));");
+            out.line("if (" + ownerLocal + " != nullptr) env->DeleteLocalRef(" + ownerLocal + ");");
+            out.outdent();
+            out.line("}");
+            out.line("static jstring " + nameStr + " = nullptr;");
+            out.line("if (" + nameStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + nameLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(name) + "\");");
+            out.line(nameStr + " = static_cast<jstring>(env->NewGlobalRef(" + nameLocal + "));");
+            out.line("if (" + nameLocal + " != nullptr) env->DeleteLocalRef(" + nameLocal + ");");
+            out.outdent();
+            out.line("}");
+            out.line("static jstring " + descStr + " = nullptr;");
+            out.line("if (" + descStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + descLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(desc) + "\");");
+            out.line(descStr + " = static_cast<jstring>(env->NewGlobalRef(" + descLocal + "));");
+            out.line("if (" + descLocal + " != nullptr) env->DeleteLocalRef(" + descLocal + ");");
+            out.outdent();
+            out.line("}");
+
+            String supplier = context.temp("dyn_supplier");
+            out.line("jobject " + supplier + " = env->CallStaticObjectMethod(" + helperCls + ", " + helperMid + ", " + ownerStr + ", " + nameStr + ", " + descStr + ", " + captured + ");");
+            emitExceptionReturn(context, out);
+            out.line("frame.stack.pushRef(" + supplier + ");");
+            out.line("if (" + captured + " != nullptr) env->DeleteLocalRef(" + captured + ");");
         }
 
         private void emitStringConcat(InvokeDynamicInsnNode node, MethodContext context, CodeWriter out) {
