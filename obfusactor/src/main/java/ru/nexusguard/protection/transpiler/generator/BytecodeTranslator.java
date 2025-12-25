@@ -254,19 +254,19 @@ public final class BytecodeTranslator {
                     out.line("frame.stack.pushI64(1);");
                     break;
                 case Opcodes.FCONST_0:
-                    out.line("frame.stack.pushI64(0);");
+                    out.line("frame.stack.pushI64(ng::runtime::packFloat(0.0f));");
                     break;
                 case Opcodes.FCONST_1:
-                    out.line("frame.stack.pushI64(1);");
+                    out.line("frame.stack.pushI64(ng::runtime::packFloat(1.0f));");
                     break;
                 case Opcodes.FCONST_2:
-                    out.line("frame.stack.pushI64(2);");
+                    out.line("frame.stack.pushI64(ng::runtime::packFloat(2.0f));");
                     break;
                 case Opcodes.DCONST_0:
-                    out.line("frame.stack.pushI64(0);");
+                    out.line("frame.stack.pushI64(ng::runtime::packDouble(0.0));");
                     break;
                 case Opcodes.DCONST_1:
-                    out.line("frame.stack.pushI64(1);");
+                    out.line("frame.stack.pushI64(ng::runtime::packDouble(1.0));");
                     break;
                 case Opcodes.ACONST_NULL:
                     out.line("frame.stack.pushRef(nullptr);");
@@ -464,41 +464,41 @@ public final class BytecodeTranslator {
         private void emitBinaryOpFloat(MethodContext context, CodeWriter out, String op) {
             String rhs = context.temp("rhs");
             String lhs = context.temp("lhs");
-            out.line("float " + rhs + " = static_cast<float>(frame.stack.popI64());");
-            out.line("float " + lhs + " = static_cast<float>(frame.stack.popI64());");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + lhs + " " + op + " " + rhs + "));");
+            out.line("float " + rhs + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+            out.line("float " + lhs + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(ng::runtime::packFloat(" + lhs + " " + op + " " + rhs + "));");
         }
 
         private void emitBinaryOpDouble(MethodContext context, CodeWriter out, String op) {
             String rhs = context.temp("rhs");
             String lhs = context.temp("lhs");
-            out.line("double " + rhs + " = static_cast<double>(frame.stack.popI64());");
-            out.line("double " + lhs + " = static_cast<double>(frame.stack.popI64());");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + lhs + " " + op + " " + rhs + "));");
+            out.line("double " + rhs + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+            out.line("double " + lhs + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(ng::runtime::packDouble(" + lhs + " " + op + " " + rhs + "));");
         }
 
         private void emitNegFloat(MethodContext context, CodeWriter out) {
             String val = context.temp("val");
-            out.line("float " + val + " = static_cast<float>(frame.stack.popI64());");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(-" + val + "));");
+            out.line("float " + val + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(ng::runtime::packFloat(-" + val + "));");
         }
 
         private void emitNegDouble(MethodContext context, CodeWriter out) {
             String val = context.temp("val");
-            out.line("double " + val + " = static_cast<double>(frame.stack.popI64());");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(-" + val + "));");
+            out.line("double " + val + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(ng::runtime::packDouble(-" + val + "));");
         }
 
         private void emitI2F(MethodContext context, CodeWriter out) {
             String val = context.temp("val");
             out.line("float " + val + " = static_cast<float>(frame.stack.popI64());");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+            out.line("frame.stack.pushI64(ng::runtime::packFloat(" + val + "));");
         }
 
         private void emitF2D(MethodContext context, CodeWriter out) {
             String val = context.temp("val");
-            out.line("double " + val + " = static_cast<double>(static_cast<float>(frame.stack.popI64()));");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+            out.line("double " + val + " = static_cast<double>(ng::runtime::unpackFloat(frame.stack.popI64()));");
+            out.line("frame.stack.pushI64(ng::runtime::packDouble(" + val + "));");
         }
 
         private void emitI2B(MethodContext context, CodeWriter out) {
@@ -523,8 +523,8 @@ public final class BytecodeTranslator {
             String rhs = context.temp("rhs");
             String lhs = context.temp("lhs");
             String cmp = context.temp("cmp");
-            out.line("float " + rhs + " = static_cast<float>(frame.stack.popI64());");
-            out.line("float " + lhs + " = static_cast<float>(frame.stack.popI64());");
+            out.line("float " + rhs + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+            out.line("float " + lhs + " = ng::runtime::unpackFloat(frame.stack.popI64());");
             out.line("int " + cmp + " = 0;");
             out.line("if ((" + lhs + " != " + lhs + ") || (" + rhs + " != " + rhs + ")) {");
             out.indent();
@@ -546,8 +546,8 @@ public final class BytecodeTranslator {
             String rhs = context.temp("rhs");
             String lhs = context.temp("lhs");
             String cmp = context.temp("cmp");
-            out.line("double " + rhs + " = static_cast<double>(frame.stack.popI64());");
-            out.line("double " + lhs + " = static_cast<double>(frame.stack.popI64());");
+            out.line("double " + rhs + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+            out.line("double " + lhs + " = ng::runtime::unpackDouble(frame.stack.popI64());");
             out.line("int " + cmp + " = 0;");
             out.line("if ((" + lhs + " != " + lhs + ") || (" + rhs + " != " + rhs + ")) {");
             out.indent();
@@ -569,7 +569,13 @@ public final class BytecodeTranslator {
             Type returnType = context.returnType();
             String jniType = typeMapper.toJniType(returnType);
             String temp = context.temp("ret");
-            out.line(jniType + " " + temp + " = static_cast<" + jniType + ">(frame.stack.popI64());");
+            if (returnType.getSort() == Type.FLOAT) {
+                out.line(jniType + " " + temp + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+            } else if (returnType.getSort() == Type.DOUBLE) {
+                out.line(jniType + " " + temp + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+            } else {
+                out.line(jniType + " " + temp + " = static_cast<" + jniType + ">(frame.stack.popI64());");
+            }
             out.line("return " + temp + ";");
             context.markReturn();
         }

@@ -1,6 +1,7 @@
 #pragma once
 #include <jni.h>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace ng {
@@ -29,6 +30,31 @@ struct Value {
         return value;
     }
 };
+
+inline int64_t packFloat(float v) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+    return static_cast<int64_t>(bits);
+}
+
+inline float unpackFloat(int64_t v) {
+    uint32_t bits = static_cast<uint32_t>(v);
+    float out = 0.0f;
+    std::memcpy(&out, &bits, sizeof(out));
+    return out;
+}
+
+inline int64_t packDouble(double v) {
+    int64_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
+
+inline double unpackDouble(int64_t v) {
+    double out = 0.0;
+    std::memcpy(&out, &v, sizeof(out));
+    return out;
+}
 
 class OperandStack {
 public:
