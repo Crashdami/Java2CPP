@@ -1,0 +1,2 @@
+rootProject.name = 'J2C'
+include 'obfusactor', 'testjar'
