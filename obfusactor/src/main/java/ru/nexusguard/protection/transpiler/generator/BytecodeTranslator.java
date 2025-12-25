@@ -718,7 +718,7 @@ public final class BytecodeTranslator {
             out.line("jobject " + arr + " = frame.stack.popRef();");
             out.line("jfloat " + val + " = 0.0f;");
             out.line("env->GetFloatArrayRegion(static_cast<jfloatArray>(" + arr + "), " + idx + ", 1, &" + val + ");");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+            out.line("frame.stack.pushI64(ng::runtime::packFloat(" + val + "));");
             out.line("if (" + arr + " != nullptr) env->DeleteLocalRef(" + arr + ");");
         }
 
@@ -730,7 +730,7 @@ public final class BytecodeTranslator {
             out.line("jobject " + arr + " = frame.stack.popRef();");
             out.line("jdouble " + val + " = 0.0;");
             out.line("env->GetDoubleArrayRegion(static_cast<jdoubleArray>(" + arr + "), " + idx + ", 1, &" + val + ");");
-            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+            out.line("frame.stack.pushI64(ng::runtime::packDouble(" + val + "));");
             out.line("if (" + arr + " != nullptr) env->DeleteLocalRef(" + arr + ");");
         }
 
@@ -821,7 +821,7 @@ public final class BytecodeTranslator {
             String val = context.temp("val");
             String idx = context.temp("idx");
             String arr = context.temp("arr");
-            out.line("jfloat " + val + " = static_cast<jfloat>(frame.stack.popI64());");
+            out.line("jfloat " + val + " = ng::runtime::unpackFloat(frame.stack.popI64());");
             out.line("jint " + idx + " = static_cast<jint>(frame.stack.popI64());");
             out.line("jobject " + arr + " = frame.stack.popRef();");
             out.line("env->SetFloatArrayRegion(static_cast<jfloatArray>(" + arr + "), " + idx + ", 1, &" + val + ");");
@@ -832,7 +832,7 @@ public final class BytecodeTranslator {
             String val = context.temp("val");
             String idx = context.temp("idx");
             String arr = context.temp("arr");
-            out.line("jdouble " + val + " = static_cast<jdouble>(frame.stack.popI64());");
+            out.line("jdouble " + val + " = ng::runtime::unpackDouble(frame.stack.popI64());");
             out.line("jint " + idx + " = static_cast<jint>(frame.stack.popI64());");
             out.line("jobject " + arr + " = frame.stack.popRef();");
             out.line("env->SetDoubleArrayRegion(static_cast<jdoubleArray>(" + arr + "), " + idx + ", 1, &" + val + ");");
@@ -858,9 +858,9 @@ public final class BytecodeTranslator {
             } else if (cst instanceof Long value) {
                 out.line("frame.stack.pushI64(" + value + "L);");
             } else if (cst instanceof Float value) {
-                out.line("frame.stack.pushI64(static_cast<int64_t>(" + value + "f));");
+                out.line("frame.stack.pushI64(ng::runtime::packFloat(" + value + "f));");
             } else if (cst instanceof Double value) {
-                out.line("frame.stack.pushI64(static_cast<int64_t>(" + value + "));");
+                out.line("frame.stack.pushI64(ng::runtime::packDouble(" + value + "));");
             } else if (cst instanceof String value) {
                 String escaped = CppStringEscaper.escape(value);
                 String tmp = context.temp("str");
@@ -1085,6 +1085,10 @@ public final class BytecodeTranslator {
                     emitExceptionReturn(context, out);
                     if (typeMapper.isReference(fieldType)) {
                         out.line("frame.stack.pushRef(" + val + ");");
+                    } else if (fieldType.getSort() == Type.FLOAT) {
+                        out.line("frame.stack.pushI64(ng::runtime::packFloat(" + val + "));");
+                    } else if (fieldType.getSort() == Type.DOUBLE) {
+                        out.line("frame.stack.pushI64(ng::runtime::packDouble(" + val + "));");
                     } else {
                         out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
                     }
@@ -1097,6 +1101,10 @@ public final class BytecodeTranslator {
                     emitExceptionReturn(context, out);
                     if (typeMapper.isReference(fieldType)) {
                         out.line("frame.stack.pushRef(" + val + ");");
+                    } else if (fieldType.getSort() == Type.FLOAT) {
+                        out.line("frame.stack.pushI64(ng::runtime::packFloat(" + val + "));");
+                    } else if (fieldType.getSort() == Type.DOUBLE) {
+                        out.line("frame.stack.pushI64(ng::runtime::packDouble(" + val + "));");
                     } else {
                         out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
                     }
@@ -1111,6 +1119,16 @@ public final class BytecodeTranslator {
                         out.line("env->" + setter + "(" + cls + ", " + fid + ", " + val + ");");
                         emitExceptionReturn(context, out);
                         out.line("if (" + val + " != nullptr) env->DeleteLocalRef(" + val + ");");
+                    } else if (fieldType.getSort() == Type.FLOAT) {
+                        String val = context.temp("val");
+                        out.line("jfloat " + val + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+                        out.line("env->" + setter + "(" + cls + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
+                    } else if (fieldType.getSort() == Type.DOUBLE) {
+                        String val = context.temp("val");
+                        out.line("jdouble " + val + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+                        out.line("env->" + setter + "(" + cls + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
                     } else {
                         String val = context.temp("val");
                         out.line("int64_t " + val + " = frame.stack.popI64();");
@@ -1126,6 +1144,22 @@ public final class BytecodeTranslator {
                         out.line("env->" + setter + "(" + obj + ", " + fid + ", " + val + ");");
                         emitExceptionReturn(context, out);
                         out.line("if (" + val + " != nullptr) env->DeleteLocalRef(" + val + ");");
+                        out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
+                    } else if (fieldType.getSort() == Type.FLOAT) {
+                        String val = context.temp("val");
+                        String obj = context.temp("obj");
+                        out.line("jfloat " + val + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+                        out.line("jobject " + obj + " = frame.stack.popRef();");
+                        out.line("env->" + setter + "(" + obj + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
+                        out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
+                    } else if (fieldType.getSort() == Type.DOUBLE) {
+                        String val = context.temp("val");
+                        String obj = context.temp("obj");
+                        out.line("jdouble " + val + " = ng::runtime::unpackDouble(frame.stack.popI64());");
+                        out.line("jobject " + obj + " = frame.stack.popRef();");
+                        out.line("env->" + setter + "(" + obj + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
                         out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
                     } else {
                         String val = context.temp("val");
@@ -1465,6 +1499,10 @@ public final class BytecodeTranslator {
                 String jniType = typeMapper.toJniType(argType);
                 if (typeMapper.isReference(argType)) {
                     out.line(jniType + " " + argName + " = static_cast<" + jniType + ">(frame.stack.popRef());");
+                } else if (argType.getSort() == Type.FLOAT) {
+                    out.line(jniType + " " + argName + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+                } else if (argType.getSort() == Type.DOUBLE) {
+                    out.line(jniType + " " + argName + " = ng::runtime::unpackDouble(frame.stack.popI64());");
                 } else {
                     out.line(jniType + " " + argName + " = static_cast<" + jniType + ">(frame.stack.popI64());");
                 }
@@ -1649,6 +1687,10 @@ public final class BytecodeTranslator {
                 String jniType = typeMapper.toJniType(argType);
                 if (typeMapper.isReference(argType)) {
                     out.line(jniType + " " + argName + " = static_cast<" + jniType + ">(frame.stack.popRef());");
+                } else if (argType.getSort() == Type.FLOAT) {
+                    out.line(jniType + " " + argName + " = ng::runtime::unpackFloat(frame.stack.popI64());");
+                } else if (argType.getSort() == Type.DOUBLE) {
+                    out.line(jniType + " " + argName + " = ng::runtime::unpackDouble(frame.stack.popI64());");
                 } else {
                     out.line(jniType + " " + argName + " = static_cast<" + jniType + ">(frame.stack.popI64());");
                 }
@@ -1713,6 +1755,10 @@ public final class BytecodeTranslator {
                 emitExceptionReturn(context, out);
                 if (typeMapper.isReference(returnType)) {
                     out.line("frame.stack.pushRef(" + ret + ");");
+                } else if (returnType.getSort() == Type.FLOAT) {
+                    out.line("frame.stack.pushI64(ng::runtime::packFloat(" + ret + "));");
+                } else if (returnType.getSort() == Type.DOUBLE) {
+                    out.line("frame.stack.pushI64(ng::runtime::packDouble(" + ret + "));");
                 } else {
                     out.line("frame.stack.pushI64(static_cast<int64_t>(" + ret + "));");
                 }
