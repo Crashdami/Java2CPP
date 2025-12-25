@@ -3,6 +3,13 @@ package tech.transpiler.testjar;
 import ru.nexusguard.protection.annotations.Native;
 
 public final class ExtraNative {
+    private static int touchCount;
+
+    public static final class Box {
+        int value;
+        String text;
+    }
+
     private ExtraNative() {
     }
 
@@ -14,6 +21,13 @@ public final class ExtraNative {
         System.out.println("Object ops result: " + objResult);
         int arrayResult = arrayOpsTest();
         System.out.println("Array ops result: " + arrayResult);
+        int lambdaResult = lambdaFieldTest();
+        System.out.println("Lambda/field result: " + lambdaResult);
+        try {
+            throwTest();
+        } catch (RuntimeException ex) {
+            System.out.println("Athrow result: " + ex.getMessage());
+        }
     }
 
     @Native
@@ -75,5 +89,26 @@ public final class ExtraNative {
         sum += chars[0];
         sum += bools[0] ? 1 : 0;
         return sum;
+    }
+
+    @Native
+    public static int lambdaFieldTest() {
+        Box box = new Box();
+        box.value = 10;
+        box.text = "ok";
+        int value = box.value;
+        String text = box.text;
+        Runnable r = ExtraNative::touch;
+        r.run();
+        return value + text.length() + touchCount;
+    }
+
+    private static void touch() {
+        touchCount++;
+    }
+
+    @Native
+    public static void throwTest() {
+        throw new RuntimeException("boom");
     }
 }

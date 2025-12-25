@@ -4,9 +4,17 @@ project(obfuscator_native LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Автопоиск Java и JNI
-find_package(Java REQUIRED COMPONENTS Development)  # при желании можно убрать REQUIRED
-find_package(JNI  REQUIRED)
+# Java + JNI
+find_package(Java REQUIRED COMPONENTS Development)
+if(NOT DEFINED ENV{JAVA_HOME} AND Java_JAVA_EXECUTABLE)
+    get_filename_component(_java_bin "${Java_JAVA_EXECUTABLE}" DIRECTORY)
+    get_filename_component(_java_home "${_java_bin}" DIRECTORY)
+    set(ENV{JAVA_HOME} "${_java_home}")
+endif()
+if(NOT DEFINED JAVA_HOME AND DEFINED ENV{JAVA_HOME})
+    set(JAVA_HOME "$ENV{JAVA_HOME}")
+endif()
+find_package(JNI REQUIRED)
 
 message(STATUS "Found Java: ${Java_JAVA_EXECUTABLE}")
 message(STATUS "JNI include dirs: ${JNI_INCLUDE_DIRS}")
@@ -22,12 +30,10 @@ set_target_properties(obfuscator_native PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-# Используем найденные JNI include‑директории вместо JAVA_HOME/include
 target_include_directories(obfuscator_native PRIVATE
     ${JNI_INCLUDE_DIRS}
 )
 
-# Если нужно, линкуем JVM (обычно достаточно JNI::JNI)
 target_link_libraries(obfuscator_native PRIVATE
     JNI::JNI
 )

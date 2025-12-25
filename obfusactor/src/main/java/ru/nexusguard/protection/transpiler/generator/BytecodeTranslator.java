@@ -3,6 +3,7 @@ package ru.nexusguard.protection.transpiler.generator;
 import ru.nexusguard.protection.transpiler.util.CppStringEscaper;
 import ru.nexusguard.protection.transpiler.util.TypeMapper;
 
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.*;
@@ -51,6 +52,22 @@ public final class BytecodeTranslator {
         boolean supports(AbstractInsnNode insn);
 
         void emit(AbstractInsnNode insn, MethodContext context, CodeWriter out);
+    }
+
+    private static void emitExceptionReturn(MethodContext context, CodeWriter out) {
+        out.line("if (env->ExceptionCheck()) {");
+        out.indent();
+        Type returnType = context.returnType();
+        TypeMapper typeMapper = context.typeMapper();
+        if (returnType.getSort() == Type.VOID) {
+            out.line("return;");
+        } else if (typeMapper.isReference(returnType)) {
+            out.line("return nullptr;");
+        } else {
+            out.line("return static_cast<" + typeMapper.toJniType(returnType) + ">(0);");
+        }
+        out.outdent();
+        out.line("}");
     }
 
     private static final class LabelHandler implements InstructionHandler {
@@ -234,6 +251,21 @@ public final class BytecodeTranslator {
                 case Opcodes.LCONST_1:
                     out.line("frame.stack.pushI64(1);");
                     break;
+                case Opcodes.FCONST_0:
+                    out.line("frame.stack.pushI64(0);");
+                    break;
+                case Opcodes.FCONST_1:
+                    out.line("frame.stack.pushI64(1);");
+                    break;
+                case Opcodes.FCONST_2:
+                    out.line("frame.stack.pushI64(2);");
+                    break;
+                case Opcodes.DCONST_0:
+                    out.line("frame.stack.pushI64(0);");
+                    break;
+                case Opcodes.DCONST_1:
+                    out.line("frame.stack.pushI64(1);");
+                    break;
                 case Opcodes.ACONST_NULL:
                     out.line("frame.stack.pushRef(nullptr);");
                     break;
@@ -247,28 +279,96 @@ public final class BytecodeTranslator {
                 case Opcodes.LADD:
                     emitBinaryOp(context, out, "+");
                     break;
+                case Opcodes.FADD:
+                    emitBinaryOpFloat(context, out, "+");
+                    break;
+                case Opcodes.DADD:
+                    emitBinaryOpDouble(context, out, "+");
+                    break;
                 case Opcodes.ISUB:
                 case Opcodes.LSUB:
                     emitBinaryOp(context, out, "-");
+                    break;
+                case Opcodes.FSUB:
+                    emitBinaryOpFloat(context, out, "-");
+                    break;
+                case Opcodes.DSUB:
+                    emitBinaryOpDouble(context, out, "-");
                     break;
                 case Opcodes.IMUL:
                 case Opcodes.LMUL:
                     emitBinaryOp(context, out, "*");
                     break;
+                case Opcodes.FMUL:
+                    emitBinaryOpFloat(context, out, "*");
+                    break;
+                case Opcodes.DMUL:
+                    emitBinaryOpDouble(context, out, "*");
+                    break;
                 case Opcodes.IDIV:
                 case Opcodes.LDIV:
                     emitBinaryOp(context, out, "/");
+                    break;
+                case Opcodes.FDIV:
+                    emitBinaryOpFloat(context, out, "/");
+                    break;
+                case Opcodes.DDIV:
+                    emitBinaryOpDouble(context, out, "/");
                     break;
                 case Opcodes.IREM:
                 case Opcodes.LREM:
                     emitBinaryOp(context, out, "%");
                     break;
+                case Opcodes.FREM:
+                    emitBinaryOpFloat(context, out, "%");
+                    break;
+                case Opcodes.DREM:
+                    emitBinaryOpDouble(context, out, "%");
+                    break;
+                case Opcodes.FNEG:
+                    emitNegFloat(context, out);
+                    break;
+                case Opcodes.DNEG:
+                    emitNegDouble(context, out);
+                    break;
+                case Opcodes.I2F:
+                    emitI2F(context, out);
+                    break;
+                case Opcodes.I2B:
+                    emitI2B(context, out);
+                    break;
+                case Opcodes.I2C:
+                    emitI2C(context, out);
+                    break;
+                case Opcodes.I2S:
+                    emitI2S(context, out);
+                    break;
+                case Opcodes.F2D:
+                    emitF2D(context, out);
+                    break;
+                case Opcodes.FCMPL:
+                    emitFloatCompare(context, out, false);
+                    break;
+                case Opcodes.FCMPG:
+                    emitFloatCompare(context, out, true);
+                    break;
+                case Opcodes.DCMPL:
+                    emitDoubleCompare(context, out, false);
+                    break;
+                case Opcodes.DCMPG:
+                    emitDoubleCompare(context, out, true);
+                    break;
                 case Opcodes.IRETURN:
                 case Opcodes.LRETURN:
+                case Opcodes.FRETURN:
+                case Opcodes.DRETURN:
                     emitPrimitiveReturn(context, out);
                     break;
                 case Opcodes.ARETURN:
                     emitReferenceReturn(context, out);
+                    break;
+                case Opcodes.ATHROW:
+                    emitAthrow(context, out);
                     break;
                 case Opcodes.BALOAD:
                     emitByteArrayLoad(context, out);
@@ -359,6 +459,110 @@ public final class BytecodeTranslator {
             out.line("frame.stack.pushI64(" + lhs + " " + op + " " + rhs + ");");
         }
 
+        private void emitBinaryOpFloat(MethodContext context, CodeWriter out, String op) {
+            String rhs = context.temp("rhs");
+            String lhs = context.temp("lhs");
+            out.line("float " + rhs + " = static_cast<float>(frame.stack.popI64());");
+            out.line("float " + lhs + " = static_cast<float>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + lhs + " " + op + " " + rhs + "));");
+        }
+
+        private void emitBinaryOpDouble(MethodContext context, CodeWriter out, String op) {
+            String rhs = context.temp("rhs");
+            String lhs = context.temp("lhs");
+            out.line("double " + rhs + " = static_cast<double>(frame.stack.popI64());");
+            out.line("double " + lhs + " = static_cast<double>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + lhs + " " + op + " " + rhs + "));");
+        }
+
+        private void emitNegFloat(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("float " + val + " = static_cast<float>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(-" + val + "));");
+        }
+
+        private void emitNegDouble(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("double " + val + " = static_cast<double>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(-" + val + "));");
+        }
+
+        private void emitI2F(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("float " + val + " = static_cast<float>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+        }
+
+        private void emitF2D(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("double " + val + " = static_cast<double>(static_cast<float>(frame.stack.popI64()));");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+        }
+
+        private void emitI2B(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("jbyte " + val + " = static_cast<jbyte>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+        }
+
+        private void emitI2C(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("jchar " + val + " = static_cast<jchar>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+        }
+
+        private void emitI2S(MethodContext context, CodeWriter out) {
+            String val = context.temp("val");
+            out.line("jshort " + val + " = static_cast<jshort>(frame.stack.popI64());");
+            out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+        }
+
+        private void emitFloatCompare(MethodContext context, CodeWriter out, boolean nanHigh) {
+            String rhs = context.temp("rhs");
+            String lhs = context.temp("lhs");
+            String cmp = context.temp("cmp");
+            out.line("float " + rhs + " = static_cast<float>(frame.stack.popI64());");
+            out.line("float " + lhs + " = static_cast<float>(frame.stack.popI64());");
+            out.line("int " + cmp + " = 0;");
+            out.line("if ((" + lhs + " != " + lhs + ") || (" + rhs + " != " + rhs + ")) {");
+            out.indent();
+            out.line(cmp + " = " + (nanHigh ? 1 : -1) + ";");
+            out.outdent();
+            out.line("} else if (" + lhs + " > " + rhs + ") {");
+            out.indent();
+            out.line(cmp + " = 1;");
+            out.outdent();
+            out.line("} else if (" + lhs + " < " + rhs + ") {");
+            out.indent();
+            out.line(cmp + " = -1;");
+            out.outdent();
+            out.line("}");
+            out.line("frame.stack.pushI64(" + cmp + ");");
+        }
+
+        private void emitDoubleCompare(MethodContext context, CodeWriter out, boolean nanHigh) {
+            String rhs = context.temp("rhs");
+            String lhs = context.temp("lhs");
+            String cmp = context.temp("cmp");
+            out.line("double " + rhs + " = static_cast<double>(frame.stack.popI64());");
+            out.line("double " + lhs + " = static_cast<double>(frame.stack.popI64());");
+            out.line("int " + cmp + " = 0;");
+            out.line("if ((" + lhs + " != " + lhs + ") || (" + rhs + " != " + rhs + ")) {");
+            out.indent();
+            out.line(cmp + " = " + (nanHigh ? 1 : -1) + ";");
+            out.outdent();
+            out.line("} else if (" + lhs + " > " + rhs + ") {");
+            out.indent();
+            out.line(cmp + " = 1;");
+            out.outdent();
+            out.line("} else if (" + lhs + " < " + rhs + ") {");
+            out.indent();
+            out.line(cmp + " = -1;");
+            out.outdent();
+            out.line("}");
+            out.line("frame.stack.pushI64(" + cmp + ");");
+        }
+
         private void emitPrimitiveReturn(MethodContext context, CodeWriter out) {
             Type returnType = context.returnType();
             String jniType = typeMapper.toJniType(returnType);
@@ -374,6 +578,44 @@ public final class BytecodeTranslator {
             String temp = context.temp("ret");
             out.line(jniType + " " + temp + " = static_cast<" + jniType + ">(frame.stack.popRef());");
             out.line("return " + temp + ";");
+            context.markReturn();
+        }
+
+        private void emitAthrow(MethodContext context, CodeWriter out) {
+            String thr = context.temp("thr");
+            out.line("jobject " + thr + " = frame.stack.popRef();");
+            out.line("if (" + thr + " == nullptr) {");
+            out.indent();
+            String npeCls = context.temp("npe_cls");
+            String npeLocal = context.temp("npe_local");
+            out.line("static jclass " + npeCls + " = nullptr;");
+            out.line("if (" + npeCls + " == nullptr) {");
+            out.indent();
+            out.line("jclass " + npeLocal + " = env->FindClass(\"java/lang/NullPointerException\");");
+            out.line(npeCls + " = static_cast<jclass>(env->NewGlobalRef(" + npeLocal + "));");
+            out.line("if (" + npeLocal + " != nullptr) env->DeleteLocalRef(" + npeLocal + ");");
+            out.outdent();
+            out.line("}");
+            out.line("env->ThrowNew(" + npeCls + ", \"\");");
+            out.outdent();
+            out.line("} else {");
+            out.indent();
+            out.line("env->Throw(static_cast<jthrowable>(" + thr + "));");
+            out.outdent();
+            out.line("}");
+            out.line("if (" + thr + " != nullptr) env->DeleteLocalRef(" + thr + ");");
+            emitThrowReturn(context, out);
+        }
+
+        private void emitThrowReturn(MethodContext context, CodeWriter out) {
+            Type returnType = context.returnType();
+            if (returnType.getSort() == Type.VOID) {
+                out.line("return;");
+            } else if (typeMapper.isReference(returnType)) {
+                out.line("return nullptr;");
+            } else {
+                out.line("return static_cast<" + typeMapper.toJniType(returnType) + ">(0);");
+            }
             context.markReturn();
         }
 
@@ -758,40 +1000,93 @@ public final class BytecodeTranslator {
         public void emit(AbstractInsnNode insn, MethodContext context, CodeWriter out) {
             FieldInsnNode field = (FieldInsnNode) insn;
             Type fieldType = Type.getType(field.desc);
+            boolean isStatic = field.getOpcode() == Opcodes.GETSTATIC || field.getOpcode() == Opcodes.PUTSTATIC;
+            boolean isGet = field.getOpcode() == Opcodes.GETSTATIC || field.getOpcode() == Opcodes.GETFIELD;
 
-            if (field.getOpcode() != Opcodes.GETSTATIC && field.getOpcode() != Opcodes.PUTSTATIC) {
-                out.line("// TODO: only static fields are supported");
-                return;
-            }
+            String cls = context.temp("cls_cache");
+            String clsLocal = context.temp("cls_local");
+            out.line("static jclass " + cls + " = nullptr;");
+            out.line("if (" + cls + " == nullptr) {");
+            out.indent();
+            out.line("jclass " + clsLocal + " = env->FindClass(\"" + field.owner + "\");");
+            out.line(cls + " = static_cast<jclass>(env->NewGlobalRef(" + clsLocal + "));");
+            out.line("if (" + clsLocal + " != nullptr) env->DeleteLocalRef(" + clsLocal + ");");
+            out.outdent();
+            out.line("}");
 
-            String cls = context.temp("cls");
-            String fid = context.temp("fid");
-            out.line("jclass " + cls + " = env->FindClass(\"" + field.owner + "\");");
-            out.line("jfieldID " + fid + " = env->GetStaticFieldID(" + cls + ", \"" + field.name + "\", \"" + field.desc + "\");");
-
-            if (field.getOpcode() == Opcodes.GETSTATIC) {
-                String val = context.temp("val");
-                String getter = typeMapper.staticGetter(fieldType);
-                out.line(typeMapper.toJniType(fieldType) + " " + val + " = env->" + getter + "(" + cls + ", " + fid + ");");
-                if (typeMapper.isReference(fieldType)) {
-                    out.line("frame.stack.pushRef(" + val + ");");
-                } else {
-                    out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
-                }
-                out.line("if (" + cls + " != nullptr) env->DeleteLocalRef(" + cls + ");");
+            String fid = context.temp("fid_cache");
+            out.line("static jfieldID " + fid + " = nullptr;");
+            out.line("if (" + fid + " == nullptr) {");
+            out.indent();
+            if (isStatic) {
+                out.line(fid + " = env->GetStaticFieldID(" + cls + ", \"" + field.name + "\", \"" + field.desc + "\");");
             } else {
-                String setter = typeMapper.staticSetter(fieldType);
-                if (typeMapper.isReference(fieldType)) {
+                out.line(fid + " = env->GetFieldID(" + cls + ", \"" + field.name + "\", \"" + field.desc + "\");");
+            }
+            out.outdent();
+            out.line("}");
+
+            if (isGet) {
+                String getter = isStatic ? typeMapper.staticGetter(fieldType) : typeMapper.staticGetter(fieldType).replace("Static", "");
+                if (isStatic) {
                     String val = context.temp("val");
-                    out.line("jobject " + val + " = frame.stack.popRef();");
-                    out.line("env->" + setter + "(" + cls + ", " + fid + ", " + val + ");");
-                    out.line("if (" + val + " != nullptr) env->DeleteLocalRef(" + val + ");");
+                    String valType = typeMapper.isReference(fieldType) ? "jobject" : typeMapper.toJniType(fieldType);
+                    out.line(valType + " " + val + " = env->" + getter + "(" + cls + ", " + fid + ");");
+                    emitExceptionReturn(context, out);
+                    if (typeMapper.isReference(fieldType)) {
+                        out.line("frame.stack.pushRef(" + val + ");");
+                    } else {
+                        out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+                    }
                 } else {
+                    String obj = context.temp("obj");
+                    out.line("jobject " + obj + " = frame.stack.popRef();");
                     String val = context.temp("val");
-                    out.line("int64_t " + val + " = frame.stack.popI64();");
-                    out.line("env->" + setter + "(" + cls + ", " + fid + ", static_cast<" + typeMapper.toJniType(fieldType) + ">(" + val + "));");
+                    String valType = typeMapper.isReference(fieldType) ? "jobject" : typeMapper.toJniType(fieldType);
+                    out.line(valType + " " + val + " = env->" + getter + "(" + obj + ", " + fid + ");");
+                    emitExceptionReturn(context, out);
+                    if (typeMapper.isReference(fieldType)) {
+                        out.line("frame.stack.pushRef(" + val + ");");
+                    } else {
+                        out.line("frame.stack.pushI64(static_cast<int64_t>(" + val + "));");
+                    }
+                    out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
                 }
-                out.line("if (" + cls + " != nullptr) env->DeleteLocalRef(" + cls + ");");
+            } else {
+                String setter = isStatic ? typeMapper.staticSetter(fieldType) : typeMapper.staticSetter(fieldType).replace("Static", "");
+                if (isStatic) {
+                    if (typeMapper.isReference(fieldType)) {
+                        String val = context.temp("val");
+                        out.line("jobject " + val + " = frame.stack.popRef();");
+                        out.line("env->" + setter + "(" + cls + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
+                        out.line("if (" + val + " != nullptr) env->DeleteLocalRef(" + val + ");");
+                    } else {
+                        String val = context.temp("val");
+                        out.line("int64_t " + val + " = frame.stack.popI64();");
+                        out.line("env->" + setter + "(" + cls + ", " + fid + ", static_cast<" + typeMapper.toJniType(fieldType) + ">(" + val + "));");
+                        emitExceptionReturn(context, out);
+                    }
+                } else {
+                    if (typeMapper.isReference(fieldType)) {
+                        String val = context.temp("val");
+                        String obj = context.temp("obj");
+                        out.line("jobject " + val + " = frame.stack.popRef();");
+                        out.line("jobject " + obj + " = frame.stack.popRef();");
+                        out.line("env->" + setter + "(" + obj + ", " + fid + ", " + val + ");");
+                        emitExceptionReturn(context, out);
+                        out.line("if (" + val + " != nullptr) env->DeleteLocalRef(" + val + ");");
+                        out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
+                    } else {
+                        String val = context.temp("val");
+                        String obj = context.temp("obj");
+                        out.line("int64_t " + val + " = frame.stack.popI64();");
+                        out.line("jobject " + obj + " = frame.stack.popRef();");
+                        out.line("env->" + setter + "(" + obj + ", " + fid + ", static_cast<" + typeMapper.toJniType(fieldType) + ">(" + val + "));");
+                        emitExceptionReturn(context, out);
+                        out.line("if (" + obj + " != nullptr) env->DeleteLocalRef(" + obj + ");");
+                    }
+                }
             }
         }
     }
@@ -812,7 +1107,11 @@ public final class BytecodeTranslator {
         public void emit(AbstractInsnNode insn, MethodContext context, CodeWriter out) {
             InvokeDynamicInsnNode node = (InvokeDynamicInsnNode) insn;
             if (!isStringConcat(node)) {
-                emitFallback(node, context, out);
+                if (isRunnableLambda(node)) {
+                    emitRunnableLambda(node, context, out);
+                } else {
+                    emitFallback(node, context, out);
+                }
                 return;
             }
 
@@ -823,6 +1122,20 @@ public final class BytecodeTranslator {
             }
 
             emitStringConcat(node, context, out);
+        }
+
+        private boolean isRunnableLambda(InvokeDynamicInsnNode node) {
+            if (!"()Ljava/lang/Runnable;".equals(node.desc)) {
+                return false;
+            }
+            if (node.bsm == null) {
+                return false;
+            }
+            if (!"java/lang/invoke/LambdaMetafactory".equals(node.bsm.getOwner())) {
+                return false;
+            }
+            String name = node.bsm.getName();
+            return "metafactory".equals(name) || "altMetafactory".equals(name);
         }
 
         private boolean isStringConcat(InvokeDynamicInsnNode node) {
@@ -844,6 +1157,72 @@ public final class BytecodeTranslator {
                 out.line("frame.stack.pushI64(0);");
             }
             out.line("// TODO: unsupported invokedynamic " + node.name + node.desc);
+        }
+
+        private void emitRunnableLambda(InvokeDynamicInsnNode node, MethodContext context, CodeWriter out) {
+            if (node.bsmArgs == null || node.bsmArgs.length < 2 || !(node.bsmArgs[1] instanceof Handle handle)) {
+                emitFallback(node, context, out);
+                return;
+            }
+
+            String owner = handle.getOwner();
+            String name = handle.getName();
+            String desc = handle.getDesc();
+
+            String helperCls = context.temp("dyn_cls");
+            String helperLocal = context.temp("dyn_cls_local");
+            out.line("static jclass " + helperCls + " = nullptr;");
+            out.line("if (" + helperCls + " == nullptr) {");
+            out.indent();
+            out.line("jclass " + helperLocal + " = env->FindClass(\"ru/nexusguard/protection/native/InvokeDynamicHelper\");");
+            out.line(helperCls + " = static_cast<jclass>(env->NewGlobalRef(" + helperLocal + "));");
+            out.line("if (" + helperLocal + " != nullptr) env->DeleteLocalRef(" + helperLocal + ");");
+            out.outdent();
+            out.line("}");
+
+            String helperMid = context.temp("dyn_mid");
+            out.line("static jmethodID " + helperMid + " = nullptr;");
+            out.line("if (" + helperMid + " == nullptr) {");
+            out.indent();
+            out.line(helperMid + " = env->GetStaticMethodID(" + helperCls + ", \"createRunnable\", \"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Runnable;\");");
+            out.outdent();
+            out.line("}");
+
+            String ownerStr = context.temp("dyn_owner");
+            String ownerLocal = context.temp("dyn_owner_local");
+            String nameStr = context.temp("dyn_name");
+            String nameLocal = context.temp("dyn_name_local");
+            String descStr = context.temp("dyn_desc");
+            String descLocal = context.temp("dyn_desc_local");
+            out.line("static jstring " + ownerStr + " = nullptr;");
+            out.line("if (" + ownerStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + ownerLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(owner) + "\");");
+            out.line(ownerStr + " = static_cast<jstring>(env->NewGlobalRef(" + ownerLocal + "));");
+            out.line("if (" + ownerLocal + " != nullptr) env->DeleteLocalRef(" + ownerLocal + ");");
+            out.outdent();
+            out.line("}");
+            out.line("static jstring " + nameStr + " = nullptr;");
+            out.line("if (" + nameStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + nameLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(name) + "\");");
+            out.line(nameStr + " = static_cast<jstring>(env->NewGlobalRef(" + nameLocal + "));");
+            out.line("if (" + nameLocal + " != nullptr) env->DeleteLocalRef(" + nameLocal + ");");
+            out.outdent();
+            out.line("}");
+            out.line("static jstring " + descStr + " = nullptr;");
+            out.line("if (" + descStr + " == nullptr) {");
+            out.indent();
+            out.line("jstring " + descLocal + " = env->NewStringUTF(\"" + CppStringEscaper.escape(desc) + "\");");
+            out.line(descStr + " = static_cast<jstring>(env->NewGlobalRef(" + descLocal + "));");
+            out.line("if (" + descLocal + " != nullptr) env->DeleteLocalRef(" + descLocal + ");");
+            out.outdent();
+            out.line("}");
+
+            String runnable = context.temp("dyn_runnable");
+            out.line("jobject " + runnable + " = env->CallStaticObjectMethod(" + helperCls + ", " + helperMid + ", " + ownerStr + ", " + nameStr + ", " + descStr + ");");
+            emitExceptionReturn(context, out);
+            out.line("frame.stack.pushRef(" + runnable + ");");
         }
 
         private void emitStringConcat(InvokeDynamicInsnNode node, MethodContext context, CodeWriter out) {
@@ -930,6 +1309,7 @@ public final class BytecodeTranslator {
 
             String result = context.temp("concat");
             out.line("jstring " + result + " = static_cast<jstring>(env->CallObjectMethod(" + sb + ", " + sbToString + "));");
+            emitExceptionReturn(context, out);
             out.line("frame.stack.pushRef(" + result + ");");
             out.line("if (" + sb + " != nullptr) env->DeleteLocalRef(" + sb + ");");
         }
@@ -954,6 +1334,7 @@ public final class BytecodeTranslator {
         private void emitAppendString(MethodContext context, CodeWriter out, String sb, String sbAppend, String str) {
             String ret = context.temp("sb_ret");
             out.line("jobject " + ret + " = env->CallObjectMethod(" + sb + ", " + sbAppend + ", " + str + ");");
+            emitExceptionReturn(context, out);
             out.line("if (" + ret + " != nullptr) env->DeleteLocalRef(" + ret + ");");
         }
 
@@ -967,6 +1348,7 @@ public final class BytecodeTranslator {
             String argExpr = valueOfArgument(argType, argName);
             String str = context.temp("str");
             out.line("jstring " + str + " = static_cast<jstring>(env->CallStaticObjectMethod(" + strClass + ", " + mid + ", " + argExpr + "));");
+            emitExceptionReturn(context, out);
             return str;
         }
 
@@ -1093,10 +1475,12 @@ public final class BytecodeTranslator {
 
             if (returnType.getSort() == Type.VOID) {
                 out.line(call + ";");
+                emitExceptionReturn(context, out);
             } else {
                 String jniType = typeMapper.toJniType(returnType);
                 String ret = context.temp("ret");
                 out.line(jniType + " " + ret + " = static_cast<" + jniType + ">(" + call + ");");
+                emitExceptionReturn(context, out);
                 if (typeMapper.isReference(returnType)) {
                     out.line("frame.stack.pushRef(" + ret + ");");
                 } else {

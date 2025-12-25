@@ -21,7 +21,7 @@ public final class TranspilerApp {
         this(new JarClassScanner(),
                 new NativeMethodCollector(),
                 new CppProjectGenerator(),
-                new JarTransformer(new NativeClassRewriter(), new NativeRunnerProvider()));
+                new JarTransformer(new NativeClassRewriter(), new RuntimeClassProvider()));
     }
 
     public TranspilerApp(JarClassScanner classScanner,

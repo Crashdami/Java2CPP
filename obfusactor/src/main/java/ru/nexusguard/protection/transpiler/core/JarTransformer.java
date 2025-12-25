@@ -14,17 +14,18 @@ import java.util.jar.JarOutputStream;
 
 public final class JarTransformer {
     private final NativeClassRewriter classRewriter;
-    private final NativeRunnerProvider runnerProvider;
+    private final RuntimeClassProvider runtimeProvider;
     private static final String NATIVE_LIB_ENTRY = "ru/nexusguard/protection/native/library.dll";
 
-    public JarTransformer(NativeClassRewriter classRewriter, NativeRunnerProvider runnerProvider) {
+    public JarTransformer(NativeClassRewriter classRewriter, RuntimeClassProvider runtimeProvider) {
         this.classRewriter = classRewriter;
-        this.runnerProvider = runnerProvider;
+        this.runtimeProvider = runtimeProvider;
     }
 
     public void transform(Path inputJar, Path outputJar) throws IOException {
         Files.createDirectories(outputJar.getParent());
-        String runnerEntryName = runnerProvider.entryName();
+        var runtimeEntries = runtimeProvider.loadAll();
+        Set<String> runtimeEntryNames = runtimeEntries.keySet();
 
         Set<String> written = new HashSet<>();
         try (JarFile jarFile = new JarFile(inputJar.toFile());
@@ -33,7 +34,7 @@ public final class JarTransformer {
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
                 String name = entry.getName();
-                if (runnerEntryName.equals(name)) {
+                if (runtimeEntryNames.contains(name)) {
                     continue;
                 }
 
@@ -66,11 +67,14 @@ public final class JarTransformer {
                 }
             }
 
-            byte[] runnerBytes = runnerProvider.loadBytes();
-            if (written.add(runnerEntryName)) {
-                JarEntry runnerEntry = new JarEntry(runnerEntryName);
-                output.putNextEntry(runnerEntry);
-                output.write(runnerBytes);
+            for (var runtimeEntry : runtimeEntries.entrySet()) {
+                String name = runtimeEntry.getKey();
+                if (!written.add(name)) {
+                    continue;
+                }
+                JarEntry outEntry = new JarEntry(name);
+                output.putNextEntry(outEntry);
+                output.write(runtimeEntry.getValue());
                 output.closeEntry();
             }
         }
