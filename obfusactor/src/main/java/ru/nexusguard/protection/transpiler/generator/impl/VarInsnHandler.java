@@ -48,6 +48,20 @@ public final class VarInsnHandler implements InstructionHandler {
                     out.line("if (" + oldRef + " != nullptr && " + oldRef + " != " + newRef + ") env->DeleteLocalRef(" + oldRef + ");");
                     out.line("frame.locals.setRef(" + var.var + ", " + newRef + ");");
                     break;
+                case Opcodes.RET:
+                    String exCls = context.temp("ret_ex_cls");
+                    String exLocal = context.temp("ret_ex_local");
+                    out.line("static jclass " + exCls + " = nullptr;");
+                    out.line("if (" + exCls + " == nullptr) {");
+                    out.indent();
+                    out.line("jclass " + exLocal + " = env->FindClass(\"java/lang/UnsupportedOperationException\");");
+                    out.line(exCls + " = static_cast<jclass>(env->NewGlobalRef(" + exLocal + "));");
+                    out.line("if (" + exLocal + " != nullptr) env->DeleteLocalRef(" + exLocal + ");");
+                    out.outdent();
+                    out.line("}");
+                    out.line("env->ThrowNew(" + exCls + ", \"RET opcode not supported\");");
+                    InstructionUtils.emitExceptionReturn(context, out);
+                    break;
                 default:
                     out.line("// TODO: unsupported var opcode " + var.getOpcode());
                     break;
