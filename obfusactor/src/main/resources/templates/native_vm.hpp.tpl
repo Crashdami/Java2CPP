@@ -156,5 +156,67 @@ struct Frame {
     }
 };
 
+inline jclass loadPrimitiveClass(JNIEnv* env, const char* wrapper, jobject& cache) {
+    if (cache == nullptr) {
+        jclass wrapperCls = env->FindClass(wrapper);
+        if (wrapperCls != nullptr) {
+            jfieldID typeField = env->GetStaticFieldID(wrapperCls, "TYPE", "Ljava/lang/Class;");
+            if (typeField != nullptr) {
+                jobject typeObj = env->GetStaticObjectField(wrapperCls, typeField);
+                if (typeObj != nullptr) {
+                    cache = env->NewGlobalRef(typeObj);
+                    env->DeleteLocalRef(typeObj);
+                }
+            }
+            env->DeleteLocalRef(wrapperCls);
+        }
+    }
+    return static_cast<jclass>(cache);
+}
+
+inline jclass GetPrimitiveClass(JNIEnv* env, char descriptor) {
+    switch (descriptor) {
+        case 'Z': {
+            static jobject boolClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Boolean", boolClass);
+        }
+        case 'B': {
+            static jobject byteClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Byte", byteClass);
+        }
+        case 'C': {
+            static jobject charClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Character", charClass);
+        }
+        case 'S': {
+            static jobject shortClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Short", shortClass);
+        }
+        case 'I': {
+            static jobject intClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Integer", intClass);
+        }
+        case 'J': {
+            static jobject longClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Long", longClass);
+        }
+        case 'F': {
+            static jobject floatClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Float", floatClass);
+        }
+        case 'D': {
+            static jobject doubleClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Double", doubleClass);
+        }
+        case 'V': {
+            static jobject voidClass = nullptr;
+            return loadPrimitiveClass(env, "java/lang/Void", voidClass);
+        }
+        default: {
+            return nullptr;
+        }
+    }
+}
+
 } // namespace runtime
 } // namespace ng
